@@ -1,0 +1,96 @@
+# ------------------------------
+# Python cache / bytecode
+# ------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ------------------------------
+# Virtual environments
+# ------------------------------
+venv/
+.venv/
+env/
+ENV/
+
+# ------------------------------
+# Environment / secrets
+# ------------------------------
+.env
+.env.*
+!.env.example
+
+# ------------------------------
+# IDE / editor files
+# ------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ------------------------------
+# Jupyter
+# ------------------------------
+.ipynb_checkpoints/
+
+# ------------------------------
+# OS junk
+# ------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ------------------------------
+# Logs / temp files
+# ------------------------------
+*.log
+logs/
+tmp/
+temp/
+
+# ------------------------------
+# Python test / coverage / build
+# ------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# ------------------------------
+# Data files
+# ------------------------------
+data/raw/
+data/interim/
+data/processed/
+
+# If you want to keep folder structure in git, create empty .gitkeep files
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+
+# ------------------------------
+# Model artifacts
+# ------------------------------
+models/artifacts/
+!models/artifacts/.gitkeep
+
+# ------------------------------
+# Local databases / exports
+# ------------------------------
+*.sqlite
+*.db
+*.parquet
+*.feather
+*.pkl
+*.joblib
+*.csv.gz
+
+# ------------------------------
+# Misc project outputs
+# ------------------------------
+reports/
+outputs/
+exports/
