@@ -115,35 +115,47 @@ def load_product_week_base() -> pd.DataFrame:
 def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add lag and rolling features per product.
+
+    IMPORTANT:
+    We compute lags and rolling stats product-by-product to avoid index
+    alignment bugs from grouped rolling chains.
     """
     df = df.sort_values(["product_id", "week_id"]).copy()
-    grouped = df.groupby("product_id")
 
-    df["lag_1_units"] = grouped["units_sold"].shift(1)
-    df["lag_2_units"] = grouped["units_sold"].shift(2)
-    df["lag_4_units"] = grouped["units_sold"].shift(4)
+    feature_frames = []
 
-    df["rolling_4w_mean"] = (
-        grouped["units_sold"]
-        .shift(1)
-        .rolling(4, min_periods=1)
-        .mean()
-        .reset_index(level=0, drop=True)
-    )
+    for product_id, g in df.groupby("product_id", sort=False):
+        g = g.sort_values("week_id").copy()
 
-    df["rolling_4w_std"] = (
-        grouped["units_sold"]
-        .shift(1)
-        .rolling(4, min_periods=1)
-        .std()
-        .reset_index(level=0, drop=True)
-    )
+        # ---------------------------
+        # Lag features
+        # ---------------------------
+        g["lag_1_units"] = g["units_sold"].shift(1)
+        g["lag_2_units"] = g["units_sold"].shift(2)
+        g["lag_4_units"] = g["units_sold"].shift(4)
 
-    df["rolling_4w_std"] = df["rolling_4w_std"].fillna(0)
+        # ---------------------------
+        # Rolling features based only on prior weeks
+        # Example:
+        # week t rolling mean = mean of weeks t-1, t-2, t-3, t-4 (where available)
+        # ---------------------------
+        shifted_units = g["units_sold"].shift(1)
 
-    # Need at least one lag to train
-    df = df[df["lag_1_units"].notna()].copy()
-    return df
+        g["rolling_4w_mean"] = shifted_units.rolling(window=4, min_periods=1).mean()
+        g["rolling_4w_std"] = shifted_units.rolling(window=4, min_periods=1).std()
+
+        # std is NaN when only one prior point exists
+        g["rolling_4w_std"] = g["rolling_4w_std"].fillna(0)
+
+        feature_frames.append(g)
+
+    out = pd.concat(feature_frames, ignore_index=True)
+
+    # Keep only rows that have at least one lag value.
+    # Baseline model should not train on the very first observation of a product.
+    out = out[out["lag_1_units"].notna()].copy()
+
+    return out
 
 
 def save_feature_table(df: pd.DataFrame):
