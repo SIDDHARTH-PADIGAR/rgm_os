@@ -1,18 +1,14 @@
-"""
-FastAPI entrypoint for Revenue Growth Management OS V1.
+from fastapi import FastAPI, Query
+import pandas as pd
+from app.db import engine
+from app.services.scenario_service import run_price_scenario
 
-Endpoints:
-- GET  /health
-- POST /train/baseline
-- POST /forecast/baseline
-"""
+app = FastAPI(title="RGM OS API")
 
-import subprocess
-from fastapi import FastAPI, HTTPException
-from app.schemas import TrainResponse, ForecastRequest, ForecastResponse
-from app.services.baseline_service import predict_baseline
 
-app = FastAPI(title="Revenue Growth Management OS")
+@app.get("/")
+def root():
+    return {"message": "RGM OS API is running"}
 
 
 @app.get("/health")
@@ -20,35 +16,82 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/train/baseline", response_model=TrainResponse)
-def train_baseline():
+@app.get("/kpi-summary")
+def kpi_summary():
+    query = """
+    SELECT
+        SUM(revenue) AS total_revenue,
+        SUM(units_sold) AS total_units,
+        AVG(revenue) AS avg_weekly_revenue,
+        AVG(units_sold) AS avg_weekly_units,
+        COUNT(DISTINCT item_id) AS unique_items,
+        COUNT(DISTINCT store_id) AS unique_stores
+    FROM rgm.fact_sales_weekly
     """
-    Triggers the baseline model training script.
-    In production this would become a job queue / workflow trigger,
-    but subprocess is fine for V1.
-    """
-    try:
-        result = subprocess.run(
-            ["python", "-m", "models.train_baseline"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        return TrainResponse(
-            status="success",
-            message=result.stdout[-1000:] if result.stdout else "Baseline model trained."
-        )
-    except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=e.stderr)
+    df = pd.read_sql(query, engine)
+    return df.iloc[0].to_dict()
 
 
-@app.post("/forecast/baseline", response_model=ForecastResponse)
-def forecast_baseline(request: ForecastRequest):
+@app.get("/promo-diagnostics")
+def promo_diagnostics(limit: int = 25):
+    query = f"""
+    SELECT
+        item_id,
+        store_id,
+        COUNT(*) AS total_weeks,
+        SUM(CASE WHEN promo_flag = 1 THEN 1 ELSE 0 END) AS promo_weeks,
+        AVG(discount_pct) AS avg_discount_pct,
+        AVG(units_sold) AS avg_units,
+        AVG(revenue) AS avg_revenue
+    FROM rgm.feature_rgm_weekly
+    GROUP BY item_id, store_id
+    ORDER BY promo_weeks DESC, avg_discount_pct DESC
+    LIMIT {limit}
     """
-    Score one product-week feature vector using the saved baseline model.
+    df = pd.read_sql(query, engine)
+    return {"rows": df.to_dict(orient="records")}
+
+
+@app.get("/forecast")
+def forecast(item_id: str = Query(...), store_id: str = Query(...)):
+    query = f"""
+    SELECT *
+    FROM rgm.feature_rgm_weekly
+    WHERE item_id = '{item_id}'
+      AND store_id = '{store_id}'
+    ORDER BY week_start_date DESC
+    LIMIT 1
     """
-    try:
-        pred = predict_baseline(request.model_dump())
-        return ForecastResponse(predicted_units=pred)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    df = pd.read_sql(query, engine)
+
+    if df.empty:
+        return {"error": "No rows found for this item/store pair."}
+
+    from pathlib import Path
+    import joblib
+
+    artifact_path = Path(__file__).resolve().parents[1] / "models" / "artifacts" / "baseline_model.joblib"
+    artifact = joblib.load(artifact_path)
+    model = artifact["model"]
+    feature_cols = artifact["feature_cols"]
+
+    row = df.iloc[0].copy()
+    X = row[feature_cols].to_frame().T.fillna(0)
+    pred = float(model.predict(X)[0])
+
+    return {
+        "item_id": item_id,
+        "store_id": store_id,
+        "week_start_date": str(row["week_start_date"]),
+        "current_price": float(row["sell_price"]) if pd.notna(row["sell_price"]) else None,
+        "predicted_units_next_week_like_state": pred
+    }
+
+
+@app.get("/scenario")
+def scenario(
+    item_id: str = Query(...),
+    store_id: str = Query(...),
+    new_price: float = Query(...)
+):
+    return run_price_scenario(item_id=item_id, store_id=store_id, new_price=new_price)
